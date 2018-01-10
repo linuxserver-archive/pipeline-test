@@ -3,6 +3,7 @@ FROM lsiobase/alpine:3.7
 # set version label
 ARG BUILD_DATE
 ARG VERSION
+ARG AIRSONIC_TAG 
 LABEL build_version="Linuxserver.io version:- ${VERSION} Build-date:- ${BUILD_DATE}"
 LABEL maintainer="sparklyballs"
 
@@ -43,11 +44,9 @@ RUN \
  echo "**** install airsonic ****" && \
  mkdir -p \
 	${AIRSONIC_HOME} && \
- AIRSONIC_VER=$(curl -sX GET "https://api.github.com/repos/airsonic/airsonic/releases/latest" \
-	| awk '/tag_name/{print $4;exit}' FS='[""]') && \
  curl -o \
  ${AIRSONIC_HOME}/airsonic.war -L \
-	"https://github.com/airsonic/airsonic/releases/download/${AIRSONIC_VER}/airsonic.war" && \
+	"https://github.com/airsonic/airsonic/releases/download/${airsonic_tag}/airsonic.war" && \
  echo "**** cleanup ****" && \
  apk del --purge \
 	build-dependencies && \
