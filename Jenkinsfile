@@ -92,7 +92,7 @@ pipeline {
               # Grabbing the current release body from external repo
               curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases/latest | jq '. |.body' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
               # Creating the start of the json payload
-              echo '{"tag_name":"'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","target_commitish": "master","name": "'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","body": "**LinuxServer Changes:**\\\\n\\\\n'${LS_RELEASE_NOTES}'\\\\n**'${EXT_REPO}' Changes:**\\\\n\\\\n' > start
+              echo '{"tag_name":"'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","target_commitish": "master","name": "'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
               # Add the end of the payload to the file
               printf '","draft": false,"prerelease": false}' >> releasebody.json
               # Combine the start and ending string This is needed do to incompatibility with JSON and Bash escape strings
