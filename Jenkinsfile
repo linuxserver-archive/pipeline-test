@@ -67,7 +67,12 @@ pipeline {
       }
     }
     stage('Docker-Push-Release') {
-      when { branch "master" }
+      when {
+        branch "master"
+        expression {
+          env.LS_RELEASE != env.EXT_RELEASE + '-ls' + env.LS_TAG_NUMBER
+        }
+      }
       steps {
         sh "echo ${DOCKERHUB_PASS} | docker login -u ${DOCKERHUB_USER} --password-stdin"
         echo 'First push the latest tag'
@@ -120,11 +125,11 @@ pipeline {
   post { 
     success {
       echo "Build good send details to discord"
-      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 1681177,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  Success\\n**Job:** '${RUN_DISPLAY_URL}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
+      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 1681177,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  Success\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Commit:** https://github.com/'${LS_USER}'/'${LS_REPO}'/commit/'${GIT_COMMIT}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
     }
     failure {
       echo "Build Bad sending details to discord"
-      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 16711680,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  failure\\n**Job:** '${RUN_DISPLAY_URL}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
+      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 16711680,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  failure\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Commit:** https://github.com/'${LS_USER}'/'${LS_REPO}'/commit/'${GIT_COMMIT}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
     }
   }
 }
