@@ -6,12 +6,15 @@ pipeline {
     BUILD_VERSION_ARG = 'AIRSONIC_TAG'
     LS_USER = 'linuxserver'
     LS_REPO = 'pipeline-test'
-    DOCKERHUB_IMAGE = 'qcom/airsonic'
-    DOCKERHUB_USER = 'qcom'
+    DOCKERHUB_IMAGE = 'linuxserver/lsipipelive'
+    DOCKERHUB_USER = 'linuxserver'
     DOCKERHUB_PASS = credentials('dockerhub_pass')
-    DEV_DOCKERHUB_IMAGE = 'dev_qcom/airsonic'
-    DEV_DOCKERHUB_USER = 'dev_qcom'
-    DEV_DOCKERHUB_PASS = credentials('dev_dockerhub_pass')
+    DEV_DOCKERHUB_IMAGE = 'linuxserver/lspipetest'
+    DEV_DOCKERHUB_USER = 'linuxserver'
+    DEV_DOCKERHUB_PASS = credentials('dockerhub_pass')
+    PR_DOCKERHUB_IMAGE = 'linuxserver/lsipipepr'
+    PR_DOCKERHUB_USER = 'linuxserver'
+    PR_DOCKERHUB_PASS = credentials('dockerhub_pass')
     BUILDS_DISCORD = credentials('build_webhook_url')
     GITHUB_TOKEN = credentials('github_token')
   }
@@ -88,6 +91,7 @@ pipeline {
         expression {
           env.LS_RELEASE != env.EXT_RELEASE + '-ls' + env.LS_TAG_NUMBER
         }
+        environment name: 'CHANGE_ID', value: ''
       }
       steps {
         echo "Pushing New tag for current commit ${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
@@ -111,14 +115,30 @@ pipeline {
         not { 
          branch "master"
         }
+        environment name: 'CHANGE_ID', value: ''
       }
       steps {
         sh "echo ${DEV_DOCKERHUB_PASS} | docker login -u ${DEV_DOCKERHUB_USER} --password-stdin"
         echo 'First push the latest tag'
         sh "docker tag ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA} ${DEV_DOCKERHUB_IMAGE}:latest"
-        sh "docker push ${DOCKERHUB_IMAGE}:latest"
+        sh "docker push ${DEV_DOCKERHUB_IMAGE}:latest"
         echo 'Pushing by release tag'
-        sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
+        sh "docker push ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
+      }
+    }
+    stage('Docker-Push-PR') {
+      when {
+        not {
+          environment name: 'CHANGE_ID', value: ''
+        }
+      }
+      steps {
+        sh "echo ${PR_DOCKERHUB_PASS} | docker login -u ${PR_DOCKERHUB_USER} --password-stdin"
+        echo 'First push the latest tag'
+        sh "docker tag ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA} ${PR_DOCKERHUB_IMAGE}:latest"
+        sh "docker push ${PR_DOCKERHUB_IMAGE}:latest"
+        echo 'Pushing by release tag'
+        sh "docker push ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
       }
     }
   }
