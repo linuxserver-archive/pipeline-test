@@ -55,7 +55,7 @@ pipeline {
     stage('Build') {
       steps {
           echo "Building most current release of ${EXT_REPO}"
-          def dockerimage = docker.build("${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER}", "--no-cache --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} .")
+          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} ."
         }
     }
     stage('Test') {
@@ -71,8 +71,21 @@ pipeline {
         }
       }
       steps {
-        dockerimage.push('latest')
-        dockerimage.push("${EXT_RELEASE}-ls${LS_TAG_NUMBER}")
+        withCredentials([
+          [
+            $class: 'UsernamePasswordMultiBinding',
+            credentialsId: 'c1701109-4bdc-4a9c-b3ea-480bec9a2ca6',
+            usernameVariable: 'DOCKERUSER',
+            passwordVariable: 'DOCKERPASS'
+          ]
+        ]) {
+          sh "echo ${DOCKERPASS} | docker login -u ${DOCKERUSER} --password-stdin"
+          echo 'First push the latest tag'
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
+          sh "docker push ${DOCKERHUB_IMAGE}:latest"
+          echo 'Pushing by release tag'
+          sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
+        }
       }
     }
     stage('Github-Tag-Push-Release') {
