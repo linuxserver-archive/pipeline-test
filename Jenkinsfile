@@ -80,7 +80,7 @@ pipeline {
           ]
         ]) {
           sh "echo $DOCKERUSER"
-          sh "echo ${DOCKERPASS} | docker login -u ${DOCKERUSER} --password-stdin"
+          sh "echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin"
           echo 'First push the latest tag'
           sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
           sh "docker push ${DOCKERHUB_IMAGE}:latest"
