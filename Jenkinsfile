@@ -71,22 +71,11 @@ pipeline {
         }
       }
       steps {
-        withCredentials([
-          [
-            $class: 'UsernamePasswordMultiBinding',
-            credentialsId: 'c1701109-4bdc-4a9c-b3ea-480bec9a2ca6',
-            usernameVariable: 'DOCKERUSER',
-            passwordVariable: 'DOCKERPASS'
-          ]
-        ]) {
-          sh "echo $DOCKERUSER"
-          sh "echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin"
-          echo 'First push the latest tag'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
-          sh "docker push ${DOCKERHUB_IMAGE}:latest"
-          echo 'Pushing by release tag'
-          sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
-        }
+        echo 'First push the latest tag'
+        sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
+        sh "docker push ${DOCKERHUB_IMAGE}:latest"
+        echo 'Pushing by release tag'
+        sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
       }
     }
     stage('Github-Tag-Push-Release') {
