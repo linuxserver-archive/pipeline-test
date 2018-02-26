@@ -132,7 +132,10 @@ pipeline {
             passwordVariable: 'DOCKERPASS'
           ]
         ]) {
-          sh "echo ${DOCKERPASS} | docker login -u ${DOCKERUSER} --password-stdin"
+          echo 'Logging into DockerHub'
+          sh '''#! /bin/bash
+             echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
+             '''
           echo 'First push the latest tag'
           sh "docker tag ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA} ${DEV_DOCKERHUB_IMAGE}:latest"
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:latest"
@@ -156,7 +159,10 @@ pipeline {
             passwordVariable: 'DOCKERPASS'
           ]
         ]) {
-          sh "echo ${DOCKERPASS} | docker login -u ${DOCKERUSER} --password-stdin"
+          echo 'Logging into DockerHub'
+          sh '''#! /bin/bash
+             echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
+             '''
           echo 'First push the latest tag'
           sh "docker tag ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA} ${PR_DOCKERHUB_IMAGE}:latest"
           sh "docker push ${PR_DOCKERHUB_IMAGE}:latest"
