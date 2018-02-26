@@ -6,7 +6,7 @@ pipeline {
     BUILD_VERSION_ARG = 'AIRSONIC_TAG'
     LS_USER = 'linuxserver'
     LS_REPO = 'pipeline-test'
-    DOCKERHUB_IMAGE = 'lsipipelive/airsonic'
+    DOCKERHUB_IMAGE = 'lspipelive/airsonic'
     DEV_DOCKERHUB_IMAGE = 'lspipetest/airsonic'
     PR_DOCKERHUB_IMAGE = 'lsipipepr/airsonic'
     BUILDS_DISCORD = credentials('build_webhook_url')
@@ -81,7 +81,7 @@ pipeline {
         ]) {
           echo 'Logging into DockerHub'
           sh '''#! /bin/bash
-             echo $DOCKERPASS | docker login -u linuxserverci --password-stdin
+             echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'First push the latest tag'
           sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
