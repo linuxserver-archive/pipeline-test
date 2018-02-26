@@ -136,10 +136,11 @@ pipeline {
           sh '''#! /bin/bash
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
-          echo 'First push the latest tag'
-          sh "docker tag ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA} ${DEV_DOCKERHUB_IMAGE}:latest"
+          echo 'Tag images to the built one'
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
+          echo 'Pushing both tags'
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:latest"
-          echo 'Pushing by release tag'
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
         }
       }
@@ -163,10 +164,11 @@ pipeline {
           sh '''#! /bin/bash
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
-          echo 'First push the latest tag'
-          sh "docker tag ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA} ${PR_DOCKERHUB_IMAGE}:latest"
+          echo 'Tag images to the built one'
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
+          echo 'Pushing both tags'
           sh "docker push ${PR_DOCKERHUB_IMAGE}:latest"
-          echo 'Pushing by release tag'
           sh "docker push ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${COMMIT_SHA}"
         }
       }
