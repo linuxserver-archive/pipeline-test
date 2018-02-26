@@ -81,7 +81,7 @@ pipeline {
         ]) {
           echo 'Logging into DockerHub'
           sh '''#! /bin/bash
-             echo ""$DOCKERPASS"" | docker login -u LinuxServerCI --password-stdin
+             echo $DOCKERPASS | docker login -u LinuxServerCI --password-stdin
              '''
           echo 'First push the latest tag'
           sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
