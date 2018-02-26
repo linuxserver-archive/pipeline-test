@@ -8,7 +8,7 @@ pipeline {
     LS_REPO = 'pipeline-test'
     DOCKERHUB_IMAGE = 'lspipelive/airsonic'
     DEV_DOCKERHUB_IMAGE = 'lspipetest/airsonic'
-    PR_DOCKERHUB_IMAGE = 'lsipipepr/airsonic'
+    PR_DOCKERHUB_IMAGE = 'lspipepr/airsonic'
     BUILDS_DISCORD = credentials('build_webhook_url')
     GITHUB_TOKEN = credentials('github_token')
   }
