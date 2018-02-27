@@ -34,6 +34,9 @@ pipeline {
           env.CODE_URL = sh(
             script: '''echo https://github.com/${LS_USER}/${LS_REPO}/commit/${GIT_COMMIT}''',
             returnStdout: true).trim()
+          env.DOCKERHUB_LINK = sh(
+            script: '''echo https://hub.docker.com/r/${DOCKERHUB_IMAGE}/tags/''',
+            returnStdout: true).trim()
           env.PULL_REQUEST = env.CHANGE_ID
         }
         script{
@@ -147,6 +150,11 @@ pipeline {
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:latest"
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-dev-${COMMIT_SHA}"
         }
+        script{
+          env.DOCKERHUB_LINK = sh(
+            script: '''echo https://hub.docker.com/r/${DEV_DOCKERHUB_IMAGE}/tags/''',
+            returnStdout: true).trim()
+        }
       }
     }
     stage('Docker-Push-PR') {
@@ -179,6 +187,9 @@ pipeline {
           env.CODE_URL = sh(
             script: '''echo https://github.com/${LS_USER}/${LS_REPO}/pull/${PULL_REQUEST}''',
             returnStdout: true).trim()
+          env.DOCKERHUB_LINK = sh(
+            script: '''echo https://hub.docker.com/r/${PR_DOCKERHUB_IMAGE}/tags/''',
+            returnStdout: true).trim()
         }
       }
     }
@@ -186,11 +197,11 @@ pipeline {
   post { 
     success {
       echo "Build good send details to discord"
-      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 1681177,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  Success\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
+      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 1681177,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  Success\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n**DockerHub:** '${DOCKERHUB_LINK}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
     }
     failure {
       echo "Build Bad sending details to discord"
-      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 16711680,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  failure\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
+      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 16711680,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  failure\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n**DockerHub:** '${DOCKERHUB_LINK}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
     }
   }
 }
