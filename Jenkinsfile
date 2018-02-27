@@ -31,7 +31,7 @@ pipeline {
           env.COMMIT_SHA = sh(
             script: '''git rev-parse HEAD''',
             returnStdout: true).trim()
-          env.CODE_URL = https://github.com/${LS_USER}/${LS_REPO}/commit/${GIT_COMMIT}
+          env.CODE_URL = 'https://github.com/'${LS_USER}'/'${LS_REPO}'/commit/'${GIT_COMMIT}
           env.PULL_REQUEST = env.CHANGE_ID
         }
         script{
@@ -174,7 +174,7 @@ pipeline {
           sh "docker push ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pr-${PULL_REQUEST}"
         }
         script{
-          env.CODE_URL = https://github.com/${LS_USER}/${LS_REPO}/pull/${PULL_REQUEST}
+          env.CODE_URL = 'https://github.com/'${LS_USER}'/'${LS_REPO}'/pull/'${PULL_REQUEST}
         }
       }
     }
