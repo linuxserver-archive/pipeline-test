@@ -32,7 +32,7 @@ pipeline {
             script: '''git rev-parse HEAD''',
             returnStdout: true).trim()
           env.CODE_URL = sh(
-            script: '''echo https://github.com/${LS_USER}/${LS_REPO}/commit/${GIT_COMMIT}'''
+            script: '''echo https://github.com/${LS_USER}/${LS_REPO}/commit/${GIT_COMMIT}''',
             returnStdout: true).trim()
           env.PULL_REQUEST = env.CHANGE_ID
         }
@@ -177,7 +177,7 @@ pipeline {
         }
         script{
           env.CODE_URL = sh(
-            script: '''echo https://github.com/${LS_USER}/${LS_REPO}/pull/${PULL_REQUEST}'''
+            script: '''echo https://github.com/${LS_USER}/${LS_REPO}/pull/${PULL_REQUEST}''',
             returnStdout: true).trim()
         }
       }
