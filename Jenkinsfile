@@ -123,6 +123,35 @@ pipeline {
               curl -H "Authorization: token ${GITHUB_TOKEN}" -X POST https://api.github.com/repos/${LS_USER}/${LS_REPO}/releases -d @releasebody.json.done'''
       }
     }
+    stage('Sync-README') {
+      when {
+        branch "master"
+        expression {
+          env.LS_RELEASE != env.EXT_RELEASE + '-ls' + env.LS_TAG_NUMBER
+        }
+      }
+      steps {
+        withCredentials([
+          [
+            $class: 'UsernamePasswordMultiBinding',
+            credentialsId: 'c1701109-4bdc-4a9c-b3ea-480bec9a2ca6',
+            usernameVariable: 'DOCKERUSER',
+            passwordVariable: 'DOCKERPASS'
+          ]
+        ]) {
+          echo 'Run Docker README Sync'
+          sh '''#! /bin/bash
+                docker run --rm=true \
+                  -e DOCKERHUB_USERNAME=$DOCKERUSER \
+                  -e DOCKERHUB_PASSWORD=$DOCKERPASS \
+                  -e GIT_REPOSITORY=${LS_USER}/${LS_REPO} \
+                  -e DOCKER_REPOSITORY=${DOCKERHUB_IMAGE} \
+                  -e GIT_BRANCH=master \
+                  lsiodev/readme-sync bash -c 'node sync'
+             '''
+        }
+      }
+    }
     stage('Docker-Push-Dev') {
       when { 
         not { 
