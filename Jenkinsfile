@@ -1,6 +1,8 @@
 pipeline {
   agent any
+  // Configuraiton for the variables used for this specific repo
   environment {
+    EXT_RELEASE_TYPE = 'github_stable'
     EXT_USER = 'airsonic'
     EXT_REPO = 'airsonic'
     BUILD_VERSION_ARG = 'AIRSONIC_TAG'
@@ -11,14 +13,19 @@ pipeline {
     PR_DOCKERHUB_IMAGE = 'lspipepr/airsonic'
     BUILDS_DISCORD = credentials('build_webhook_url')
     GITHUB_TOKEN = credentials('github_token')
+    DIST_IMAGE = 'alpine'
+    DIST_TAG = '3.7'
+    DIST_PACKAGES = 'ffmpeg \
+                     flac \
+                     lame \
+                     openjdk8-jre \
+                     ttf-dejavu'
   }
   stages {
-    stage("Set ENV Variables"){
+    // Setup all the basic environment variables needed for the build
+    stage("Set ENV Variables base"){
       steps{
         script{
-          env.EXT_RELEASE = sh(
-            script: '''curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases/latest | jq -r '. | .tag_name' ''',
-            returnStdout: true).trim()
           env.LS_RELEASE = sh(
             script: '''curl -s https://api.github.com/repos/${LS_USER}/${LS_REPO}/releases/latest | jq -r '. | .tag_name' ''',
             returnStdout: true).trim()
@@ -59,17 +66,68 @@ pipeline {
         }
       }
     }
+    /* #######################
+       Package Version Tagging
+       ####################### */
+    // If this is an alpine base image determine the base package tag to use
+    stage("Set Package tag Alpine"){
+      when {
+        expression {
+          env.DIST_IMAGE = 'alpine'
+        }
+      }
+      steps{
+        echo 'Grabbing the latest alpine base image'
+        sh '''docker pull alpine:${DIST_TAG}'''
+        echo 'Generating the package hash from the current versions'
+        script{
+          env.PACKAGE_TAG = sh(
+            script: '''docker run -it alpine:${DIST_TAG} sh -c 'apk update --quiet && apk info ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    /* ########################
+       External Release Tagging
+       ######################## */
+    // If this is a stable github release use the latest endpoint from github to determine the ext tag
+    stage("Set ENV github_stable"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE = 'github_stable'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases/latest | jq -r '. | .tag_name' ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    /* ###############
+       Build Container
+       ############### */
+    // Build Docker container for push to LS Repo
     stage('Build') {
       steps {
           echo "Building most current release of ${EXT_REPO}"
-          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} ."
+          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} ."
         }
     }
+    /* #######
+       Testing
+       ####### */
+    // Run Container tests
     stage('Test') {
       steps {
        echo 'CI Tests for future use'
       }
     }
+    /* ##################
+       Live Release Logic
+       ################## */
+    // If this is a public release push this to the live repo triggered by an external repo update or LS repo update on master
     stage('Docker-Push-Release') {
       when {
         branch "master"
@@ -91,13 +149,14 @@ pipeline {
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'First push the latest tag'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
           sh "docker push ${DOCKERHUB_IMAGE}:latest"
           echo 'Pushing by release tag'
-          sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
+          sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER}"
         }
       }
     }
+    // If this is a public release tag it in the LS Github and push a changelog from external repo and our internal one
     stage('Github-Tag-Push-Release') {
       when { 
         branch "master"
@@ -114,7 +173,7 @@ pipeline {
               # Grabbing the current release body from external repo
               curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases/latest | jq '. |.body' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
               # Creating the start of the json payload
-              echo '{"tag_name":"'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","target_commitish": "master","name": "'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
+              echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'","target_commitish": "master","name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'","body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
               # Add the end of the payload to the file
               printf '","draft": false,"prerelease": false}' >> releasebody.json
               # Combine the start and ending string This is needed do to incompatibility with JSON and Bash escape strings
@@ -123,6 +182,7 @@ pipeline {
               curl -H "Authorization: token ${GITHUB_TOKEN}" -X POST https://api.github.com/repos/${LS_USER}/${LS_REPO}/releases -d @releasebody.json.done'''
       }
     }
+    // Use helper container to push the current README in master to the DockerHub Repo
     stage('Sync-README') {
       when {
         branch "master"
@@ -141,6 +201,7 @@ pipeline {
         ]) {
           echo 'Run Docker README Sync'
           sh '''#! /bin/bash
+                docker pull lsiodev/readme-sync
                 docker run --rm=true \
                   -e DOCKERHUB_USERNAME=$DOCKERUSER \
                   -e DOCKERHUB_PASSWORD=$DOCKERPASS \
@@ -152,6 +213,10 @@ pipeline {
         }
       }
     }
+    /* #################
+       Dev Release Logic
+       ################# */
+    // Push to the Dev user dockerhub endpoint when this is a non master branch
     stage('Docker-Push-Dev') {
       when { 
         not { 
@@ -173,11 +238,11 @@ pipeline {
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'Tag images to the built one'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:latest"
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-dev-${COMMIT_SHA}"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-dev-${COMMIT_SHA}"
           echo 'Pushing both tags'
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:latest"
-          sh "docker push ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-dev-${COMMIT_SHA}"
+          sh "docker push ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-dev-${COMMIT_SHA}"
         }
         script{
           env.DOCKERHUB_LINK = sh(
@@ -186,6 +251,10 @@ pipeline {
         }
       }
     }
+    /* ################
+       PR Release Logic
+       ################ */
+    // Push to PR user dockerhub endpoint when this is a pull request
     stage('Docker-Push-PR') {
       when {
         not {
@@ -206,11 +275,11 @@ pipeline {
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'Tag images to the built one'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:latest"
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pr-${PULL_REQUEST}"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-pr-${PULL_REQUEST}"
           echo 'Pushing both tags'
           sh "docker push ${PR_DOCKERHUB_IMAGE}:latest"
-          sh "docker push ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pr-${PULL_REQUEST}"
+          sh "docker push ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-pr-${PULL_REQUEST}"
         }
         script{
           env.CODE_URL = sh(
@@ -223,6 +292,9 @@ pipeline {
       }
     }
   }
+  /* ######################
+     Send status to Discord
+     ###################### */
   post { 
     success {
       echo "Build good send details to discord"
