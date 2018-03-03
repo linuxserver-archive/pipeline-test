@@ -73,7 +73,7 @@ pipeline {
     stage("Set Package tag Alpine"){
       when {
         expression {
-          env.DIST_IMAGE = 'alpine'
+          env.DIST_IMAGE == 'alpine'
         }
       }
       steps{
@@ -94,7 +94,7 @@ pipeline {
     stage("Set ENV github_stable"){
       when {
         expression {
-          env.EXT_RELEASE_TYPE = 'github_stable'
+          env.EXT_RELEASE_TYPE == 'github_stable'
         }
       }
       steps{
