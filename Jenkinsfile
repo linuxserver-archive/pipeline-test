@@ -82,7 +82,7 @@ pipeline {
         echo 'Generating the package hash from the current versions'
         script{
           env.PACKAGE_TAG = sh(
-            script: '''docker run -it alpine:${DIST_TAG} sh -c 'apk update --quiet && apk info ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+            script: '''docker run alpine:${DIST_TAG} sh -c 'apk update --quiet && apk info ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
             returnStdout: true).trim()
         }
       }
