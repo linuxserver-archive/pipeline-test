@@ -3,6 +3,7 @@ pipeline {
   // Configuraiton for the variables used for this specific repo
   environment {
     EXT_RELEASE_TYPE = 'github_stable'
+    EXT_GIT_BRANCH = 'master'
     EXT_USER = 'airsonic'
     EXT_REPO = 'airsonic'
     BUILD_VERSION_ARG = 'AIRSONIC_TAG'
@@ -20,6 +21,8 @@ pipeline {
                      lame \
                      openjdk8-jre \
                      ttf-dejavu'
+    DIST_REPO = 'none'
+    DIST_REPO_PACKAGES = 'none'
   }
   stages {
     // Setup all the basic environment variables needed for the build
@@ -57,10 +60,10 @@ pipeline {
                        # Get the commit for the current tag
                        tagsha=$(git rev-list -n 1 ${LS_RELEASE} 2>/dev/null)
                        # If this is a new commit then increment the LinuxServer release version
-                       if [ "${tagsha}" == "${COMMIT_SHA}" ]; then 
-                         echo ${LS_RELEASE_NUMBER} 
-                       else 
-                         echo $((${LS_RELEASE_NUMBER} + 1)) 
+                       if [ "${tagsha}" == "${COMMIT_SHA}" ]; then
+                         echo ${LS_RELEASE_NUMBER}
+                       else
+                         echo $((${LS_RELEASE_NUMBER} + 1))
                        fi''',
             returnStdout: true).trim()
         }
@@ -73,7 +76,7 @@ pipeline {
     stage("Set Package tag Alpine"){
       when {
         expression {
-          env.DIST_IMAGE == 'alpine'
+          env.DIST_IMAGE == 'alpine' && env.DIST_PACKAGES != 'none'
         }
       }
       steps{
@@ -82,7 +85,43 @@ pipeline {
         echo 'Generating the package hash from the current versions'
         script{
           env.PACKAGE_TAG = sh(
-            script: '''docker run alpine:${DIST_TAG} sh -c 'apk update --quiet && apk info ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+            script: '''docker run --rm alpine:${DIST_TAG} sh -c 'apk update --quiet\
+                       && apk info ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is an ubuntu base image determine the base package tag to use
+    stage("Set Package tag Ubuntu"){
+      when {
+        expression {
+          env.DIST_IMAGE == 'ubuntu' && env.DIST_PACKAGES != 'none'
+        }
+      }
+      steps{
+        echo 'Grabbing the latest alpine base image'
+        sh '''docker pull ubuntu:${DIST_TAG}'''
+        echo 'Generating the package hash from the current versions'
+        script{
+          env.PACKAGE_TAG = sh(
+            script: '''docker run --rm ubuntu:${DIST_TAG} sh -c\
+                       'apt-get --allow-unauthenticated update -qq >/dev/null 2>&1 &&\
+                        apt-cache --no-all-versions show ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If there are no base packages to tag in this build config set to none
+    stage("Set Package tag none"){
+      when {
+        expression {
+          env.DIST_PACKAGES == 'none'
+        }
+      }
+      steps{
+        script{
+          env.PACKAGE_TAG = sh(
+            script: '''echo none''',
             returnStdout: true).trim()
         }
       }
@@ -105,6 +144,87 @@ pipeline {
         }
       }
     }
+    // If this is an os release set release type to none to indicate no external release
+    stage("Set ENV os"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'os'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = 'none'
+          env.RELEASE_LINK = 'none'
+        }
+      }
+    }
+    // If this is a stable or devel github release generate the link for the build message
+    stage("Set ENV github_link"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'github_stable' || env.EXT_RELEASE_TYPE == 'github_devel'
+        }
+      }
+      steps{
+        script{
+          env.RELEASE_LINK = sh(
+            script: '''echo https://github.com/${EXT_USER}/${EXT_REPO}/releases/tag/${EXT_RELEASE}''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is a deb repo release calculate a hash for the package version
+    stage("Set EXT tag deb repo"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'deb_repo'
+        }
+      }
+      steps{
+        echo 'Grabbing the latest base image'
+        sh '''docker pull ${DIST_IMAGE}:${DIST_TAG}'''
+        echo 'Generating the package hash from the current versions'
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''docker run --rm ${DIST_IMAGE}:${DIST_TAG} sh -c\
+                       'echo "${DIST_REPO}" > /etc/apt/sources.list.d/check.list \
+                        && apt-get --allow-unauthenticated update -qq >/dev/null 2>&1\
+                        && apt-cache --no-all-versions show ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+            returnStdout: true).trim()
+          env.RELEASE_LINK = 'deb_repo'
+        }
+      }
+    }
+    // If this is a github commit trigger determine the current commit at head
+    stage("Set ENV github_commit"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'github_commit'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/commits/${EXT_GIT_BRANCH} | jq -r '. | .sha' | cut -c1-8 ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is a github commit trigger Set the external release link
+    stage("Set ENV commit_link"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'github_commit'
+        }
+      }
+      steps{
+        script{
+          env.RELEASE_LINK = sh(
+            script: '''echo https://github.com/${EXT_USER}/${EXT_REPO}/commit/${EXT_RELEASE} ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
     /* ###############
        Build Container
        ############### */
@@ -112,7 +232,8 @@ pipeline {
     stage('Build') {
       steps {
           echo "Building most current release of ${EXT_REPO}"
-          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} ."
+          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} \
+          --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} ."
         }
     }
     /* #######
@@ -132,7 +253,7 @@ pipeline {
       when {
         branch "master"
         expression {
-          env.LS_RELEASE != env.EXT_RELEASE + '-ls' + env.LS_TAG_NUMBER
+          env.LS_RELEASE != env.EXT_RELEASE + '-pkg-' + env.PACKAGE_TAG + '-ls' + env.LS_TAG_NUMBER
         }
       }
       steps {
@@ -158,22 +279,56 @@ pipeline {
     }
     // If this is a public release tag it in the LS Github and push a changelog from external repo and our internal one
     stage('Github-Tag-Push-Release') {
-      when { 
+      when {
         branch "master"
         expression {
-          env.LS_RELEASE != env.EXT_RELEASE + '-ls' + env.LS_TAG_NUMBER
+          env.LS_RELEASE != env.EXT_RELEASE + '-pkg-' + env.PACKAGE_TAG + '-ls' + env.LS_TAG_NUMBER
         }
         environment name: 'CHANGE_ID', value: ''
       }
       steps {
-        echo "Pushing New tag for current commit ${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
-        sh '''curl -H "Authorization: token ${GITHUB_TOKEN}" -X POST https://api.github.com/repos/${LS_USER}/${LS_REPO}/git/tags -d '{"tag":"'${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}'","object": "'${COMMIT_SHA}'","message": "Tagging Release '${EXT_RELEASE}'-ls'${LS_TAG_NUMBER}' to master","type": "commit",  "tagger": {"name": "LinuxServer Jenkins","email": "jenkins@linuxserver.io","date": "'${GITHUB_DATE}'"}}' '''
+        echo "Pushing New tag for current commit ${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER}"
+        sh '''curl -H "Authorization: token ${GITHUB_TOKEN}" -X POST https://api.github.com/repos/${LS_USER}/${LS_REPO}/git/tags \
+        -d '{"tag":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+             "object": "'${COMMIT_SHA}'",\
+             "message": "Tagging Release '${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}' to master",\
+             "type": "commit",\
+             "tagger": {"name": "LinuxServer Jenkins","email": "jenkins@linuxserver.io","date": "'${GITHUB_DATE}'"}}' '''
         echo "Pushing New release for Tag"
         sh '''#! /bin/bash
-              # Grabbing the current release body from external repo
-              curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases/latest | jq '. |.body' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
-              # Creating the start of the json payload
-              echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'","target_commitish": "master","name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'","body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
+              if [ ${EXT_RELEASE_TYPE} == 'github_stable' ] || [ ${EXT_RELEASE_TYPE} == 'github_devel' ]; then
+                # Grabbing the current release body from external repo
+                curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/releases/latest | jq '. |.body' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
+                       # Grabbing the current release body from external repo
+              elif [ ${EXT_RELEASE_TYPE} == 'github_commit' ]; then
+                curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/commits/${EXT_GIT_BRANCH} | jq '. | .commit.message' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
+              elif [ ${EXT_RELEASE_TYPE} == 'os' ]; then
+                # Using base package version for release notes
+                echo "Updating base packages to ${PACKAGE_TAG}" > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**OS Changes:**\\n\\n' > start
+              elif [ ${EXT_RELEASE_TYPE} == 'deb_repo' ] || [ ${EXT_RELEASE_TYPE} == 'alpine_repo' ]; then
+                # Using base package version for release notes
+                echo "Updating deb repo packages to ${EXT_RELEASE}" > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**Repo Changes:**\\n\\n' > start
+              fi
               # Add the end of the payload to the file
               printf '","draft": false,"prerelease": false}' >> releasebody.json
               # Combine the start and ending string This is needed do to incompatibility with JSON and Bash escape strings
@@ -187,7 +342,7 @@ pipeline {
       when {
         branch "master"
         expression {
-          env.LS_RELEASE != env.EXT_RELEASE + '-ls' + env.LS_TAG_NUMBER
+          env.LS_RELEASE != env.EXT_RELEASE + '-pkg-' + env.PACKAGE_TAG + '-ls' + env.LS_TAG_NUMBER
         }
       }
       steps {
@@ -218,8 +373,8 @@ pipeline {
        ################# */
     // Push to the Dev user dockerhub endpoint when this is a non master branch
     stage('Docker-Push-Dev') {
-      when { 
-        not { 
+      when {
+        not {
          branch "master"
         }
         environment name: 'CHANGE_ID', value: ''
@@ -295,14 +450,18 @@ pipeline {
   /* ######################
      Send status to Discord
      ###################### */
-  post { 
+  post {
     success {
       echo "Build good send details to discord"
-      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 1681177,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  Success\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n**DockerHub:** '${DOCKERHUB_LINK}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
+      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 1681177,\
+             "description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  Success\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: '${RELEASE_LINK}'\\n**DockerHub:** '${DOCKERHUB_LINK}'\\n"}],\
+             "username": "Jenkins"}' ${BUILDS_DISCORD} '''
     }
     failure {
       echo "Build Bad sending details to discord"
-      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 16711680,"description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  failure\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: https://github.com/'${EXT_USER}'/'${EXT_REPO}'/releases/tag/'${EXT_RELEASE}'\\n**DockerHub:** '${DOCKERHUB_LINK}'\\n"}],"username": "Jenkins"}' ${BUILDS_DISCORD} '''
+      sh ''' curl -X POST --data '{"avatar_url": "https://wiki.jenkins-ci.org/download/attachments/2916393/headshot.png","embeds": [{"color": 16711680,\
+             "description": "**Build:**  '${BUILD_NUMBER}'\\n**Status:**  failure\\n**Job:** '${RUN_DISPLAY_URL}'\\n**Change:** '${CODE_URL}'\\n**External Release:**: '${RELEASE_LINK}'\\n**DockerHub:** '${DOCKERHUB_LINK}'\\n"}],\
+             "username": "Jenkins"}' ${BUILDS_DISCORD} '''
     }
   }
 }
