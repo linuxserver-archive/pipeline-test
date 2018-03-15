@@ -6,6 +6,9 @@ pipeline {
     EXT_GIT_BRANCH = 'master'
     EXT_USER = 'airsonic'
     EXT_REPO = 'airsonic'
+    EXT_NPM = 'none'
+    EXT_PIP = 'none'
+    EXT_BLOB = 'none'
     BUILD_VERSION_ARG = 'AIRSONIC_TAG'
     LS_USER = 'linuxserver'
     LS_REPO = 'pipeline-test'
@@ -86,7 +89,7 @@ pipeline {
         script{
           env.PACKAGE_TAG = sh(
             script: '''docker run --rm alpine:${DIST_TAG} sh -c 'apk update --quiet\
-                       && apk info ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+                       && apk info '"${DIST_PACKAGES}"' | md5sum | cut -c1-8' ''',
             returnStdout: true).trim()
         }
       }
@@ -106,7 +109,7 @@ pipeline {
           env.PACKAGE_TAG = sh(
             script: '''docker run --rm ubuntu:${DIST_TAG} sh -c\
                        'apt-get --allow-unauthenticated update -qq >/dev/null 2>&1 &&\
-                        apt-cache --no-all-versions show ${DIST_PACKAGES} | md5sum | cut -c1-8' ''',
+                        apt-cache --no-all-versions show '"${DIST_PACKAGES}"' | md5sum | cut -c1-8' ''',
             returnStdout: true).trim()
         }
       }
@@ -225,6 +228,99 @@ pipeline {
         }
       }
     }
+    // If this is a github tag trigger determine the current tag
+    stage("Set ENV github_tag"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'github_tag'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/tags | jq -r '.[0] | .name' ''',
+            returnStdout: true).trim()
+          env.EXT_COMMIT_URL = sh(
+            script: '''curl -s https://api.github.com/repos/${EXT_USER}/${EXT_REPO}/tags | jq -r '.[0] | .commit.url' ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is a github tag trigger Set the external release link
+    stage("Set ENV tag_link"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'github_tag'
+        }
+      }
+      steps{
+        script{
+          env.RELEASE_LINK = sh(
+            script: '''echo https://github.com/${EXT_USER}/${EXT_REPO}/releases/tag/${EXT_RELEASE} ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is a npm version change set the external release verison and link
+    stage("Set ENV npm_version"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'npm_version'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''curl -s https://skimdb.npmjs.com/registry/${EXT_NPM} |jq -r '. | .["dist-tags"].latest' ''',
+            returnStdout: true).trim()
+          env.RELEASE_LINK = sh(
+            script: '''echo https://www.npmjs.com/package/${EXT_NPM} ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is a pip version change set the external release verison and link
+    stage("Set ENV pip_version"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'pip_version'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''curl -s  https://pypi.python.org/pypi/${EXT_PIP}/json |jq -r '. | .info.version' ''',
+            returnStdout: true).trim()
+          env.RELEASE_LINK = sh(
+            script: '''echo https://pypi.python.org/pypi/${EXT_PIP} ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
+    // If this is a File blob set the ext version based on the remote files md5
+    stage("Set ENV external_blob"){
+      when {
+        expression {
+          env.EXT_RELEASE_TYPE == 'external_blob'
+        }
+      }
+      steps{
+        script{
+          env.EXT_RELEASE = sh(
+            script: '''#! /bin/bash
+                       # Make sure the remote file returns a 200 status or fail
+                       if [ $(curl -I -sL -w "%{http_code}" ${EXT_BLOB} -o /dev/null) == 200 ]; then
+                         curl -s -L ${EXT_BLOB} | md5sum | cut -c1-8
+                       else
+                         exit 1
+                       fi''',
+            returnStdout: true).trim()
+          env.RELEASE_LINK = sh(
+            script: '''echo "Remote Blob Change" ''',
+            returnStdout: true).trim()
+        }
+      }
+    }
     /* ###############
        Build Container
        ############### */
@@ -232,8 +328,8 @@ pipeline {
     stage('Build') {
       steps {
           echo "Building most current release of ${EXT_REPO}"
-          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} \
-          --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION=${LS_TAG_NUMBER} --build-arg BUILD_DATE=${GITHUB_DATE} ."
+          sh "docker build --no-cache -t ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} \
+          --build-arg ${BUILD_VERSION_ARG}=${EXT_RELEASE} --build-arg VERSION="${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER}" --build-arg BUILD_DATE=${GITHUB_DATE} ."
         }
     }
     /* #######
@@ -270,10 +366,10 @@ pipeline {
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'First push the latest tag'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DOCKERHUB_IMAGE}:latest"
           sh "docker push ${DOCKERHUB_IMAGE}:latest"
           echo 'Pushing by release tag'
-          sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER}"
+          sh "docker push ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER}"
         }
       }
     }
@@ -312,6 +408,13 @@ pipeline {
                        "target_commitish": "master",\
                        "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
                        "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
+              elif [ ${EXT_RELEASE_TYPE} == 'github_tag' ]; then
+                curl -s ${EXT_COMMIT_URL} | jq '. | .commit.message' | sed 's:^.\\(.*\\).$:\\1:' > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**'${EXT_REPO}' Changes:**\\n\\n' > start
               elif [ ${EXT_RELEASE_TYPE} == 'os' ]; then
                 # Using base package version for release notes
                 echo "Updating base packages to ${PACKAGE_TAG}" > releasebody.json
@@ -328,6 +431,30 @@ pipeline {
                        "target_commitish": "master",\
                        "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
                        "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**Repo Changes:**\\n\\n' > start
+              elif [ ${EXT_RELEASE_TYPE} == 'npm_version' ]; then
+                # Using base package version for release notes
+                echo "Updating NPM version of ${EXT_NPM} to ${EXT_RELEASE}" > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**NPM Changes:**\\n\\n' > start
+              elif [ ${EXT_RELEASE_TYPE} == 'pip_version' ]; then
+                # Using base package version for release notes
+                echo "Updating PIP version of ${EXT_PIP} to ${EXT_RELEASE}" > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**PIP Changes:**\\n\\n' > start
+              elif [ ${EXT_RELEASE_TYPE} == 'external_blob' ]; then
+                # Using base package version for release notes
+                echo "External Release file changed at ${EXT_BLOB}" > releasebody.json
+                # Creating the start of the json payload
+                echo '{"tag_name":"'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "target_commitish": "master",\
+                       "name": "'${EXT_RELEASE}'-pkg-'${PACKAGE_TAG}'-ls'${LS_TAG_NUMBER}'",\
+                       "body": "**LinuxServer Changes:**\\n\\n'${LS_RELEASE_NOTES}'\\n**Remote Changes:**\\n\\n' > start
               fi
               # Add the end of the payload to the file
               printf '","draft": false,"prerelease": false}' >> releasebody.json
@@ -393,8 +520,8 @@ pipeline {
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'Tag images to the built one'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:latest"
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-dev-${COMMIT_SHA}"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-dev-${COMMIT_SHA}"
           echo 'Pushing both tags'
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:latest"
           sh "docker push ${DEV_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-dev-${COMMIT_SHA}"
@@ -430,8 +557,8 @@ pipeline {
              echo $DOCKERPASS | docker login -u $DOCKERUSER --password-stdin
              '''
           echo 'Tag images to the built one'
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:latest"
-          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-pr-${PULL_REQUEST}"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:latest"
+          sh "docker tag ${DOCKERHUB_IMAGE}:${EXT_RELEASE}-ls${LS_TAG_NUMBER} ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-pr-${PULL_REQUEST}"
           echo 'Pushing both tags'
           sh "docker push ${PR_DOCKERHUB_IMAGE}:latest"
           sh "docker push ${PR_DOCKERHUB_IMAGE}:${EXT_RELEASE}-pkg-${PACKAGE_TAG}-pr-${PULL_REQUEST}"
